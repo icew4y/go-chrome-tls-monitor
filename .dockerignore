@@ -1,0 +1,31 @@
+# Ignore build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Ignore Git files
+.git
+.gitignore
+
+# Ignore documentation
+*.md
+README*
+
+# Ignore IDE files
+.vscode
+.idea
+*.swp
+*.swo
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore temporary files
+*.tmp
+*.temp
+*.log
+
+# Ignore the existing state file (will be created fresh in container)
+state.json

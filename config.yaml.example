@@ -1,0 +1,55 @@
+# Chrome TLS Monitor Configuration
+# This is a sample configuration file showing all available options with their default values.
+# You can customize these values according to your needs.
+
+url: "https://tls.peet.ws/api/all"
+
+# On Windows: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+chrome_path: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+
+
+
+# Optional webhook URL to POST notifications when TLS fingerprint changes
+# For Slack: Create an Incoming Webhook in your Slack app settings
+# Example: "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+webhook_url: ""
+
+# Timeout for the entire Chrome execution (duration format: 30s, 1m, 1h30m)
+request_timeout: "30s"
+
+chrome_update_every: "24h"
+
+http_addr: ":8080"
+
+# Database configuration
+database_path: "C:\\app\\data\\fingerprints.db"
+
+# Extra command-line arguments to pass to Chrome
+# Container-friendly Chrome arguments
+extra_args:
+  - "--headless"
+  - "--no-sandbox"
+  - "--disable-dev-shm-usage"
+  - "--disable-gpu"
+  - "--disable-web-security"
+  - "--disable-features=VizDisplayCompositor"
+  - "--disable-extensions"
+  - "--disable-plugins"
+  - "--disable-images"
+  - "--disable-javascript"
+  - "--disable-default-apps"
+  - "--disable-sync"
+  - "--disable-translate"
+  - "--disable-background-timer-throttling"
+  - "--disable-renderer-backgrounding"
+  - "--disable-backgrounding-occluded-windows"
+  - "--disable-client-side-phishing-detection"
+  - "--disable-component-extensions-with-background-pages"
+  - "--disable-ipc-flooding-protection"
+  - "--no-first-run"
+  - "--no-default-browser-check"
+  - "--user-data-dir=C:\\chrome-data"
+
+
+# API endpoint for Chrome version information (usually don't need to change this)
+chrome_version_api: "https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions/all/releases?filter=fraction=1"
