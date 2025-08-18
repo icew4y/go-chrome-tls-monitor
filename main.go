@@ -149,6 +149,9 @@ func loadConfig() Config {
 			if yamlCfg.ChromeVersionAPI != "" {
 				cfg.ChromeVersionAPI = yamlCfg.ChromeVersionAPI
 			}
+			if yamlCfg.ChromeUpdateEvery > 0 {
+				cfg.ChromeUpdateEvery = yamlCfg.ChromeUpdateEvery
+			}
 			log.Printf("INFO: Loaded configuration from %q", configPath)
 		}
 	} else {
@@ -894,7 +897,7 @@ func main() {
 	if _, err := checkAndUpdateChrome(cfg); err != nil {
 		log.Printf("ERROR (Chrome version check): %v", err)
 	}
-
+	log.Printf("Chrome update every: %v", cfg.ChromeUpdateEvery)
 	chromeUpdateTicker = time.NewTicker(cfg.ChromeUpdateEvery)
 	defer chromeUpdateTicker.Stop()
 
