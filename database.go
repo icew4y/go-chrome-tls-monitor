@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -86,7 +87,16 @@ func (d *Database) SaveTLSFingerprint(fingerprint *TLSFingerprint) error {
 		fingerprint.CollectedAt,
 	)
 
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Force a checkpoint after each save to ensure data is in the main file
+	if checkpointErr := d.Checkpoint(); checkpointErr != nil {
+		log.Printf("WARN: Failed to checkpoint database after save: %v", checkpointErr)
+	}
+
+	return nil
 }
 
 // GetLatestFingerprint gets the most recent fingerprint for a specific Chrome version
@@ -98,6 +108,22 @@ func (d *Database) GetLatestFingerprint(chromeVersion string) (*TLSFingerprint, 
 		WHERE chrome_version = ?
 		ORDER BY collected_at DESC
 		LIMIT 1`, chromeVersion).Scan(&f.ID, &f.ChromeVersion, &f.RawResponse, &f.CollectedAt, &f.CreatedAt)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &f, nil
+}
+
+// GetLatestFingerprintAnyVersion gets the most recent fingerprint from any Chrome version
+func (d *Database) GetLatestFingerprintAnyVersion() (*TLSFingerprint, error) {
+	var f TLSFingerprint
+	err := d.db.QueryRow(`
+		SELECT id, chrome_version, raw_response, collected_at, created_at
+		FROM tls_fingerprints
+		ORDER BY collected_at DESC
+		LIMIT 1`).Scan(&f.ID, &f.ChromeVersion, &f.RawResponse, &f.CollectedAt, &f.CreatedAt)
 
 	if err != nil {
 		return nil, err
@@ -134,7 +160,17 @@ func (d *Database) GetFingerprintHistory(limit int) ([]TLSFingerprint, error) {
 	return fingerprints, nil
 }
 
+// Checkpoint forces SQLite to merge WAL data back to the main database file
+func (d *Database) Checkpoint() error {
+	_, err := d.db.Exec("PRAGMA wal_checkpoint(FULL)")
+	return err
+}
+
 // Close closes the database connection
 func (d *Database) Close() error {
+	// Force a checkpoint before closing to ensure data is in the main file
+	if err := d.Checkpoint(); err != nil {
+		log.Printf("WARN: Failed to checkpoint database: %v", err)
+	}
 	return d.db.Close()
 }

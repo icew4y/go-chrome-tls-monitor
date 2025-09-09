@@ -806,11 +806,22 @@ func runOnce(db *Database, cfg Config) error {
 	}
 
 	var prevPeetprint string
+	var prevChromeVersion string
+
+	// First try to get fingerprint for the same Chrome version
 	if prevFingerprint, err := db.GetLatestFingerprint(chromeVersion); err == nil {
 		prevPeetprint = extractPeetprintFromJSON(prevFingerprint.RawResponse)
-		log.Printf("DEBUG: Found previous peetprint: %q", prevPeetprint)
+		prevChromeVersion = prevFingerprint.ChromeVersion
+		log.Printf("DEBUG: Found previous peetprint for same version %s: %q", chromeVersion, prevPeetprint)
 	} else {
-		log.Printf("DEBUG: No previous fingerprint found for Chrome version %s: %v", chromeVersion, err)
+		// If no fingerprint exists for this Chrome version, get the latest from any version
+		if prevFingerprint, err := db.GetLatestFingerprintAnyVersion(); err == nil {
+			prevPeetprint = extractPeetprintFromJSON(prevFingerprint.RawResponse)
+			prevChromeVersion = prevFingerprint.ChromeVersion
+			log.Printf("DEBUG: Found previous peetprint from different version %s: %q", prevChromeVersion, prevPeetprint)
+		} else {
+			log.Printf("DEBUG: No previous fingerprint found in database: %v", err)
+		}
 	}
 
 	now := time.Now()
@@ -821,7 +832,11 @@ func runOnce(db *Database, cfg Config) error {
 		if prevPeetprint == "" {
 			log.Printf("TLS fingerprint FIRST RUN:")
 		} else {
-			log.Printf("TLS fingerprint CHANGED:")
+			if prevChromeVersion != chromeVersion {
+				log.Printf("TLS fingerprint CHANGED (Chrome updated %s -> %s):", prevChromeVersion, chromeVersion)
+			} else {
+				log.Printf("TLS fingerprint CHANGED:")
+			}
 		}
 		log.Printf("  PEETPRINT: %q (prev: %q)", currentPeetprint, prevPeetprint)
 		log.Printf("  Chrome Version: %s", chromeVersion)
