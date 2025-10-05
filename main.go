@@ -78,6 +78,28 @@ func defaultChromePath() string {
 	return "/usr/bin/chromium-browser"
 }
 
+// findChromeOnWindows searches for Chrome in common Windows installation paths
+func findChromeOnWindows() (string, error) {
+	possiblePaths := []string{
+		`C:\Program Files\Google\Chrome\Application\chrome.exe`,
+		`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
+	}
+
+	// Also check user-specific installation
+	if userProfile := os.Getenv("LOCALAPPDATA"); userProfile != "" {
+		possiblePaths = append(possiblePaths, userProfile+`\Google\Chrome\Application\chrome.exe`)
+	}
+
+	for _, path := range possiblePaths {
+		if _, err := os.Stat(path); err == nil {
+			log.Printf("INFO: Found Chrome at: %s", path)
+			return path, nil
+		}
+	}
+
+	return "", fmt.Errorf("chrome not found in any common Windows locations")
+}
+
 func splitArgs(s string) []string {
 	fields := []string{}
 	cur := strings.Builder{}
@@ -560,9 +582,47 @@ func checkAndUpdateChrome(cfg Config) (bool, error) {
 		return false, fmt.Errorf("failed to install Chrome: %w", err)
 	}
 
-	newVersion, err := getCurrentChromeVersion(cfg.ChromePath)
-	if err != nil {
-		return false, fmt.Errorf("failed to verify Chrome version after installation: %w", err)
+	// Retry verification with delays and alternative path checking
+	var newVersion string
+	var verifyErr error
+	maxRetries := 5
+	retryDelay := 3 * time.Second
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		log.Printf("INFO: Verifying Chrome installation (attempt %d/%d)...", attempt, maxRetries)
+
+		newVersion, verifyErr = getCurrentChromeVersion(cfg.ChromePath)
+		if verifyErr == nil {
+			break
+		}
+
+		log.Printf("WARN: Verification attempt %d failed: %v", attempt, verifyErr)
+
+		// Try to find Chrome in alternative locations
+		if isWindows() {
+			if foundPath, err := findChromeOnWindows(); err == nil {
+				log.Printf("INFO: Chrome found at alternative location: %s", foundPath)
+				log.Printf("INFO: Consider updating chrome_path in config.yaml to: %s", foundPath)
+
+				// Try to get version from the found path
+				newVersion, verifyErr = getCurrentChromeVersion(foundPath)
+				if verifyErr == nil {
+					// Update the config path for this session
+					cfg.ChromePath = foundPath
+					break
+				}
+			}
+		}
+
+		if attempt < maxRetries {
+			log.Printf("INFO: Waiting %v before retry...", retryDelay)
+			time.Sleep(retryDelay)
+			retryDelay *= 2 // Exponential backoff
+		}
+	}
+
+	if verifyErr != nil {
+		return false, fmt.Errorf("failed to verify Chrome version after installation (tried %d times): %w", maxRetries, verifyErr)
 	}
 
 	log.Printf("INFO: Chrome successfully updated from %s to %s", currentVersion, newVersion)
@@ -885,8 +945,23 @@ func main() {
 	log.Printf("Chrome TLS fingerprint monitor started.")
 	cfg := loadConfig()
 
+	// Try to find Chrome and update config path if necessary
 	if _, err := os.Stat(cfg.ChromePath); err != nil {
-		log.Printf("WARN: Chrome not found at %q (override with CHROME_PATH). Error: %v", cfg.ChromePath, err)
+		log.Printf("WARN: Chrome not found at configured path %q. Error: %v", cfg.ChromePath, err)
+
+		if isWindows() {
+			if foundPath, findErr := findChromeOnWindows(); findErr == nil {
+				log.Printf("INFO: Chrome found at alternative location: %s", foundPath)
+				log.Printf("INFO: Using discovered Chrome path for this session")
+				log.Printf("INFO: Consider updating chrome_path in config.yaml to: %s", foundPath)
+				cfg.ChromePath = foundPath
+			} else {
+				log.Printf("WARN: Could not find Chrome in common Windows locations: %v", findErr)
+				log.Printf("WARN: Chrome operations may fail. Override with CHROME_PATH environment variable or config.yaml")
+			}
+		}
+	} else {
+		log.Printf("INFO: Chrome found at: %s", cfg.ChromePath)
 	}
 
 	startHTTP(cfg.HTTPAddr)
@@ -909,9 +984,16 @@ func main() {
 	}
 
 	var chromeUpdateTicker *time.Ticker
+	consecutiveChromeFailures := 0
+	maxConsecutiveFailures := 3 // Stop checking after 3 consecutive failures
+
 	if _, err := checkAndUpdateChrome(cfg); err != nil {
 		log.Printf("ERROR (Chrome version check): %v", err)
+		consecutiveChromeFailures++
+	} else {
+		consecutiveChromeFailures = 0
 	}
+
 	log.Printf("Chrome update every: %v", cfg.ChromeUpdateEvery)
 	chromeUpdateTicker = time.NewTicker(cfg.ChromeUpdateEvery)
 	defer chromeUpdateTicker.Stop()
@@ -919,10 +1001,34 @@ func main() {
 	for {
 		select {
 		case <-chromeUpdateTicker.C:
+			if consecutiveChromeFailures >= maxConsecutiveFailures {
+				log.Printf("WARN: Skipping Chrome update check due to %d consecutive failures. Please fix Chrome installation manually.", consecutiveChromeFailures)
+				log.Printf("WARN: Chrome update checks are paused. Restart the application after fixing Chrome installation.")
+				continue
+			}
+
 			isUpdated, err := checkAndUpdateChrome(cfg)
 			if err != nil {
 				log.Printf("ERROR (Chrome version check): %v", err)
+				consecutiveChromeFailures++
+
+				if consecutiveChromeFailures >= maxConsecutiveFailures {
+					log.Printf("ERROR: Chrome update checks failed %d times consecutively. Pausing Chrome update checks.", consecutiveChromeFailures)
+					log.Printf("ERROR: Please manually fix Chrome installation and restart the application.")
+
+					if cfg.WebhookURL != "" {
+						notify(cfg.WebhookURL, map[string]any{
+							"type":                 "chrome_update_failed",
+							"at":                   time.Now().UTC().Format(time.RFC3339),
+							"consecutive_failures": consecutiveChromeFailures,
+							"error":                err.Error(),
+						})
+					}
+				}
+			} else {
+				consecutiveChromeFailures = 0 // Reset counter on success
 			}
+
 			if isUpdated {
 				log.Printf("INFO: Chrome was updated, running immediate TLS check...")
 				if err := runOnce(db, cfg); err != nil {
